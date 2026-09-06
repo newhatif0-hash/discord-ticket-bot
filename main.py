@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import os
+import asyncio
 from datetime import datetime
 
 # Setup
@@ -117,7 +118,7 @@ class CloseTicketButtons(discord.ui.View):
         
         # Delete channel after 5 seconds
         await interaction.followup.send("🔒 سيتم حذف التذكرة خلال 5 ثواني...")
-        await discord.utils.sleep_for(5)
+        await asyncio.sleep(5)
         await channel.delete(reason="تم إغلاق التذكرة")
 
 # Command to send ticket embed
@@ -139,4 +140,4 @@ if not TOKEN:
     print("❌ لم يتم العثور على DISCORD_TOKEN")
 else:
     bot.run(TOKEN)
-      
+            
