@@ -7,117 +7,7 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Databases
-member_warns = {}
-
-# Role IDs Mapping
-ROLE_PERMISSIONS = {
-    "clear": [1545277913077907558, 1545277921109745764],
-    "timeout": [1545277913077907558, 1545277937836761128, 1545277921109745764],
-    "warn": [1545277913077907558, 1545277937836761128, 1545277921109745764],
-    "warn_list": [1545277937836761128, 1545277913077907558, 1545277921109745764],
-    "role": [1545277913077907558, 1545277888897617940],
-    "lock": [1545277888897617940, 1545277913077907558],
-    "kick": [1545277888897617940, 1545277913077907558],
-    "ban": [1545277888897617940, 1545277913077907558]
-}
-
-async def has_mod_role(ctx, permission_key):
-    """Checks if the user has any of the required roles for a specific command"""
-    user_role_ids = [role.id for role in ctx.author.roles]
-    required_roles = ROLE_PERMISSIONS.get(permission_key, [])
-    return any(role_id in user_role_ids for role_id in required_roles)
-
-async def send_log(ctx, embed):
-    """Sends moderation actions to mod-logs channel"""
-    logs_channel = discord.utils.get(ctx.guild.text_channels, name="mod-logs")
-    if not logs_channel:
-        try:
-            logs_channel = await ctx.guild.create_text_channel("mod-logs")
-        except:
-            return
-    await logs_channel.send(embed=embed)
-
-@bot.event
-async def on_ready():
-    print(f"✅ البوت جاهز: {bot.user}")
-
-# ========================
-# MODERATION COMMANDS
-# ========================
-
-# 1. CLEARING (مسح)
-@bot.command(name="مسح")
-async def clear(ctx, amount: int = 5):
-    if not await has_mod_role(ctx, "clear"):
-        return await ctx.send("❌ ليس لديك صلاحية استخدام هذا الأمر!")
-    
-    deleted = await ctx.channel.purge(limit=amount + 1)
-    await ctx.send(f"✅ تم مسح {len(deleted)-1} رسالة", delete_after=5)
-    
-    embed = discord.Embed(title="🗑️ مسح رسائل", color=discord.Color.blue())
-    embed.add_field(name="المسؤول", value=ctx.author.mention)
-    embed.add_field(name="القناة", value=ctx.channel.mention)
-    embed.add_field(name="العدد", value=str(len(deleted)-1))
-    await send_log(ctx, embed)
-
-# 2. TIMEOUT (صمها، اسكت، اص)
-@bot.command(name="صمها", aliases=["اسكت", "اص"])
-async def timeout(ctx, member: discord.Member, minutes: int = 10):
-    if not await has_mod_role(ctx, "timeout"):
-        return await ctx.send("❌ ليس لديك صلاحية إسكات الأعضاء!")
-    
-    duration = timedelta(minutes=minutes)
-    await member.timeout(duration, reason=f"إسكات بواسطة {ctx.author}")
-    await ctx.send(f"✅ تم إسكات {member.mention} لمدة {minutes} دقيقة")
-    
-    embed = discord.Embed(title="🔇 إسكات عضو", color=discord.Color.orange())
-    embed.add_field(name="العضو", value=member.mention)
-    embed.add_field(name="المسؤول", value=ctx.author.mention)
-    embed.add_field(name="المدة", value=f"{minutes} دقيقة")
-    await send_log(ctx, embed)
-
-# 3. WARN (تحذير، ت)
-@bot.command(name="تحذير", aliases=["ت"])
-async def warn(ctx, member: discord.Member, *, reason="لا يوجد سبب"):
-    if not await has_mod_role(ctx, "warn"):
-        return await ctx.send("❌ ليس لديك صلاحية تحذير الأعضاء!")
-    
-    guild_id = ctx.guild.id
-    if guild_id not in member_warns: member_warns[guild_id] = {}
-    if member.id not in member_warns[guild_id]: member_warns[guild_id][member.id] = 0
-    
-    member_warns[guild_id][member.id] += 1
-    count = member_warns[guild_id][member.id]
-    
-    await ctx.send(f"✅ تم تحذير {member.mention} | التحذير رقم: {count}")
-    
-    embed = discord.Embed(title="⚠️ تحذير", color=discord.Color.yellow())
-    embed.add_field(name="العضو", value=member.mention)
-    embed.add_field(name="المسؤول", value=ctx.author.mention)
-    embed.add_field(name="السبب", value=reason)
-    embed.add_field(name="إجمالي التحذيرات", value=str(count))
-    await send_log(ctx, embed)
-
-# 4. WARNS LIST (تحذيرات)
-@bot.command(name="تحذيرات")
-async def warn_list(ctx, member: discord.Member):
-    if not await has_mod_role(ctx, "warn_list"):
-        returnIt looks like the previous response was cut off. Here is the **complete, fully functional code**. 
-
-I have integrated the specific **Role IDs** you provided. Each command now checks if the user has one of the required roles before executing.
-
-```python
-import discord
-from discord.ext import commands
-from datetime import datetime, timedelta
-
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-# Temporary database for warnings (Reset when bot restarts)
+# Temporary database for warnings
 member_warns = {}
 
 # YOUR ROLE IDs MAPPING
@@ -133,13 +23,13 @@ ROLE_PERMISSIONS = {
 }
 
 async def has_permission(ctx, permission_key):
-    """Helper to check if user has one of the required Role IDs"""
+    """Checks if the user has one of the required Role IDs for the action"""
     user_role_ids = [role.id for role in ctx.author.roles]
     required_roles = ROLE_PERMISSIONS.get(permission_key, [])
     return any(role_id in user_role_ids for role_id in required_roles)
 
 async def log_action(ctx, embed):
-    """Helper to send logs to #mod-logs"""
+    """Sends moderation logs to a channel named #mod-logs"""
     log_channel = discord.utils.get(ctx.guild.text_channels, name="mod-logs")
     if not log_channel:
         try:
@@ -153,7 +43,7 @@ async def on_ready():
     print(f"✅ System Ready: {bot.user}")
 
 # ========================
-# COMMANDS
+# MODERATION COMMANDS
 # ========================
 
 # 1. CLEARING (مسح)
@@ -178,14 +68,17 @@ async def timeout(ctx, member: discord.Member, minutes: int = 10):
         return await ctx.send("❌ ليس لديك صلاحية إسكات الأعضاء!")
     
     duration = timedelta(minutes=minutes)
-    await member.timeout(duration, reason=f"Mod Action by {ctx.author}")
-    await ctx.send(f"✅ تم إسكات {member.mention} لمدة {minutes} دقيقة")
-    
-    embed = discord.Embed(title="🔇 إسكات عضو", color=discord.Color.orange())
-    embed.add_field(name="العضو", value=member.mention)
-    embed.add_field(name="المسؤول", value=ctx.author.mention)
-    embed.add_field(name="المدة", value=f"{minutes} دقيقة")
-    await log_action(ctx, embed)
+    try:
+        await member.timeout(duration, reason=f"Mod Action by {ctx.author}")
+        await ctx.send(f"✅ تم إسكات {member.mention} لمدة {minutes} دقيقة")
+        
+        embed = discord.Embed(title="🔇 إسكات عضو", color=discord.Color.orange())
+        embed.add_field(name="العضو", value=member.mention)
+        embed.add_field(name="المسؤول", value=ctx.author.mention)
+        embed.add_field(name="المدة", value=f"{minutes} دقيقة")
+        await log_action(ctx, embed)
+    except Exception as e:
+        await ctx.send(f"❌ حدث خطأ: {e}")
 
 # 3. WARN (تحذير، ت)
 @bot.command(name="تحذير", aliases=["ت"])
@@ -305,4 +198,3 @@ async def ban(ctx, member: discord.Member, *, reason="لا يوجد سبب"):
     await log_action(ctx, embed)
 
 bot.run("YOUR_TOKEN_HERE")
-```
