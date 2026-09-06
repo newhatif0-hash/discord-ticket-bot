@@ -26,7 +26,7 @@ async def on_ready():
 # Create ticket button
 class TicketButtons(discord.ui.View):
     def __init__(self):
-        super().__init__(persistent=True)
+        super().__init__(timeout=None)
     
     @discord.ui.button(label="فتح تذكرة", style=discord.ButtonStyle.green, emoji="🎫")
     async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -85,7 +85,7 @@ class TicketButtons(discord.ui.View):
 # Close ticket button
 class CloseTicketButtons(discord.ui.View):
     def __init__(self):
-        super().__init__()
+        super().__init__(timeout=None)
     
     @discord.ui.button(label="إغلاق التذكرة", style=discord.ButtonStyle.red, emoji="🔒")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -140,4 +140,4 @@ if not TOKEN:
     print("❌ لم يتم العثور على DISCORD_TOKEN")
 else:
     bot.run(TOKEN)
-            
+    
