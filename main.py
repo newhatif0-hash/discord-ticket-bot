@@ -1,152 +1,308 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
-import os
-import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-tickets = {}
-ticket_counter = {}
+# Databases
+member_warns = {}
+
+# Role IDs Mapping
+ROLE_PERMISSIONS = {
+    "clear": [1545277913077907558, 1545277921109745764],
+    "timeout": [1545277913077907558, 1545277937836761128, 1545277921109745764],
+    "warn": [1545277913077907558, 1545277937836761128, 1545277921109745764],
+    "warn_list": [1545277937836761128, 1545277913077907558, 1545277921109745764],
+    "role": [1545277913077907558, 1545277888897617940],
+    "lock": [1545277888897617940, 1545277913077907558],
+    "kick": [1545277888897617940, 1545277913077907558],
+    "ban": [1545277888897617940, 1545277913077907558]
+}
+
+async def has_mod_role(ctx, permission_key):
+    """Checks if the user has any of the required roles for a specific command"""
+    user_role_ids = [role.id for role in ctx.author.roles]
+    required_roles = ROLE_PERMISSIONS.get(permission_key, [])
+    return any(role_id in user_role_ids for role_id in required_roles)
+
+async def send_log(ctx, embed):
+    """Sends moderation actions to mod-logs channel"""
+    logs_channel = discord.utils.get(ctx.guild.text_channels, name="mod-logs")
+    if not logs_channel:
+        try:
+            logs_channel = await ctx.guild.create_text_channel("mod-logs")
+        except:
+            return
+    await logs_channel.send(embed=embed)
 
 @bot.event
 async def on_ready():
     print(f"✅ البوت جاهز: {bot.user}")
-    try:
-        synced = await bot.tree.sync()
-        print(f"✅ تم مزامنة {len(synced)} أوامر")
-    except Exception as e:
-        print(e)
 
-class TicketButtons(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-    
-    @discord.ui.button(label="فتح تذكرة", style=discord.ButtonStyle.success, emoji="🎫")
-    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guild = interaction.guild
-        user = interaction.user
-        
-        # Check if user already has ticket
-        for channel in guild.text_channels:
-            if channel.topic and f"user_id:{user.id}" in channel.topic:
-                await interaction.response.send_message("❌ أنت تملك تذكرة مفتوحة بالفعل!", ephemeral=True)
-                return
-        
-        if guild.id not in ticket_counter:
-            ticket_counter[guild.id] = 0
-        ticket_counter[guild.id] += 1
-        
-        ticket_number = ticket_counter[guild.id]
-        channel_name = f"🎫-تذكرة-{ticket_number}"
-        
-        support_role = discord.utils.get(guild.roles, name="Support")
-        if not support_role:
-            support_role = await guild.create_role(name="Support", color=discord.Color.blue())
-        
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            support_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            bot.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        }
-        
-        ticket_channel = await guild.create_text_channel(
-            channel_name,
-            overwrites=overwrites,
-            topic=f"user_id:{user.id}|ticket_id:{ticket_number}"
-        )
-        
-        if guild.id not in tickets:
-            tickets[guild.id] = {}
-        tickets[guild.id][ticket_channel.id] = {
-            "user_id": user.id,
-            "ticket_number": ticket_number,
-            "created_at": datetime.now(),
-            "status": "🟢 مفتوحة"
-        }
-        
-        # Welcome embed - MATCHING YOUR DESIGN
-        embed = discord.Embed(
-            title="Welcome to Ticket",
-            description="مرحباً بك في نظام التذاكر\nهذه قناتك الخاصة للدعم",
-            color=discord.Color.from_rgb(88, 101, 242)
-        )
-        embed.add_field(name="👤 صاحب التذكرة", value=f"{user.mention}", inline=True)
-        embed.add_field(name="📊 رقم التذكرة", value=f"#{ticket_number}", inline=True)
-        embed.add_field(name="🔖 الحالة", value="🟢 مفتوحة", inline=True)
-        embed.add_field(name="📅 وقت الإنشاء", value=f"<t:{int(datetime.now().timestamp())}:F>", inline=False)
-        embed.set_footer(text="⚠️ لا تغلق هذه الرسالة")
-        
-        await ticket_channel.send(embed=embed, view=TicketActionButtons())
-        
-        await interaction.response.send_message(
-            f"✅ تم إنشاء تذكرتك: {ticket_channel.mention}",
-            ephemeral=True
-        )
+# ========================
+# MODERATION COMMANDS
+# ========================
 
-class TicketActionButtons(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+# 1. CLEARING (مسح)
+@bot.command(name="مسح")
+async def clear(ctx, amount: int = 5):
+    if not await has_mod_role(ctx, "clear"):
+        return await ctx.send("❌ ليس لديك صلاحية استخدام هذا الأمر!")
     
-    @discord.ui.button(label="قبول", style=discord.ButtonStyle.success, emoji="✅")
-    async def accept_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        channel = interaction.channel
-        guild = interaction.guild
-        
-        embed = discord.Embed(
-            title="✅ تم قبول التذكرة",
-            description=f"تم قبول التذكرة بواسطة {interaction.user.mention}",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="🕐 الوقت", value=f"<t:{int(datetime.now().timestamp())}:F>", inline=False)
-        
-        await channel.send(embed=embed)
-        await interaction.response.defer()
+    deleted = await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f"✅ تم مسح {len(deleted)-1} رسالة", delete_after=5)
     
-    @discord.ui.button(label="رفض", style=discord.ButtonStyle.red, emoji="❌")
-    async def reject_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        channel = interaction.channel
-        guild = interaction.guild
-        
-        embed = discord.Embed(
-            title="❌ تم رفض التذكرة",
-            description=f"تم رفض التذكرة بواسطة {interaction.user.mention}",
-            color=discord.Color.red()
-        )
-        embed.add_field(name="🕐 الوقت", value=f"<t:{int(datetime.now().timestamp())}:F>", inline=False)
-        
-        await channel.send(embed=embed)
-        await interaction.response.defer()
+    embed = discord.Embed(title="🗑️ مسح رسائل", color=discord.Color.blue())
+    embed.add_field(name="المسؤول", value=ctx.author.mention)
+    embed.add_field(name="القناة", value=ctx.channel.mention)
+    embed.add_field(name="العدد", value=str(len(deleted)-1))
+    await send_log(ctx, embed)
+
+# 2. TIMEOUT (صمها، اسكت، اص)
+@bot.command(name="صمها", aliases=["اسكت", "اص"])
+async def timeout(ctx, member: discord.Member, minutes: int = 10):
+    if not await has_mod_role(ctx, "timeout"):
+        return await ctx.send("❌ ليس لديك صلاحية إسكات الأعضاء!")
     
-    @discord.ui.button(label="معلق", style=discord.ButtonStyle.primary, emoji="⏳")
-    async def pending_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        channel = interaction.channel
-        
-        embed = discord.Embed(
-            title="⏳ التذكرة معلقة",
-            description=f"تم وضع التذكرة في الانتظار بواسطة {interaction.user.mention}",
-            color=discord.Color.from_rgb(255, 165, 0)
-        )
-        embed.add_field(name="🕐 الوقت", value=f"<t:{int(datetime.now().timestamp())}:F>", inline=False)
-        
-        await channel.send(embed=embed)
-        await interaction.response.defer()
+    duration = timedelta(minutes=minutes)
+    await member.timeout(duration, reason=f"إسكات بواسطة {ctx.author}")
+    await ctx.send(f"✅ تم إسكات {member.mention} لمدة {minutes} دقيقة")
     
-    @discord.ui.button(label="غلق", style=discord.ButtonStyle.danger, emoji="🔒")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
+    embed = discord.Embed(title="🔇 إسكات عضو", color=discord.Color.orange())
+    embed.add_field(name="العضو", value=member.mention)
+    embed.add_field(name="المسؤول", value=ctx.author.mention)
+    embed.add_field(name="المدة", value=f"{minutes} دقيقة")
+    await send_log(ctx, embed)
+
+# 3. WARN (تحذير، ت)
+@bot.command(name="تحذير", aliases=["ت"])
+async def warn(ctx, member: discord.Member, *, reason="لا يوجد سبب"):
+    if not await has_mod_role(ctx, "warn"):
+        return await ctx.send("❌ ليس لديك صلاحية تحذير الأعضاء!")
+    
+    guild_id = ctx.guild.id
+    if guild_id not in member_warns: member_warns[guild_id] = {}
+    if member.id not in member_warns[guild_id]: member_warns[guild_id][member.id] = 0
+    
+    member_warns[guild_id][member.id] += 1
+    count = member_warns[guild_id][member.id]
+    
+    await ctx.send(f"✅ تم تحذير {member.mention} | التحذير رقم: {count}")
+    
+    embed = discord.Embed(title="⚠️ تحذير", color=discord.Color.yellow())
+    embed.add_field(name="العضو", value=member.mention)
+    embed.add_field(name="المسؤول", value=ctx.author.mention)
+    embed.add_field(name="السبب", value=reason)
+    embed.add_field(name="إجمالي التحذيرات", value=str(count))
+    await send_log(ctx, embed)
+
+# 4. WARNS LIST (تحذيرات)
+@bot.command(name="تحذيرات")
+async def warn_list(ctx, member: discord.Member):
+    if not await has_mod_role(ctx, "warn_list"):
+        returnIt looks like the previous response was cut off. Here is the **complete, fully functional code**. 
+
+I have integrated the specific **Role IDs** you provided. Each command now checks if the user has one of the required roles before executing.
+
+```python
+import discord
+from discord.ext import commands
+from datetime import datetime, timedelta
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# Temporary database for warnings (Reset when bot restarts)
+member_warns = {}
+
+# YOUR ROLE IDs MAPPING
+ROLE_PERMISSIONS = {
+    "clear": [1545277913077907558, 1545277921109745764],
+    "timeout": [1545277913077907558, 1545277937836761128, 1545277921109745764],
+    "warn": [1545277913077907558, 1545277937836761128, 1545277921109745764],
+    "warn_list": [1545277937836761128, 1545277913077907558, 1545277921109745764],
+    "role": [1545277913077907558, 1545277888897617940],
+    "lock": [1545277888897617940, 1545277913077907558],
+    "kick": [1545277888897617940, 1545277913077907558],
+    "ban": [1545277888897617940, 1545277913077907558]
+}
+
+async def has_permission(ctx, permission_key):
+    """Helper to check if user has one of the required Role IDs"""
+    user_role_ids = [role.id for role in ctx.author.roles]
+    required_roles = ROLE_PERMISSIONS.get(permission_key, [])
+    return any(role_id in user_role_ids for role_id in required_roles)
+
+async def log_action(ctx, embed):
+    """Helper to send logs to #mod-logs"""
+    log_channel = discord.utils.get(ctx.guild.text_channels, name="mod-logs")
+    if not log_channel:
+        try:
+            log_channel = await ctx.guild.create_text_channel("mod-logs")
+        except:
+            return
+    await log_channel.send(embed=embed)
+
+@bot.event
+async def on_ready():
+    print(f"✅ System Ready: {bot.user}")
+
+# ========================
+# COMMANDS
+# ========================
+
+# 1. CLEARING (مسح)
+@bot.command(name="مسح")
+async def clear(ctx, amount: int = 5):
+    if not await has_permission(ctx, "clear"):
+        return await ctx.send("❌ ليس لديك صلاحية استخدام هذا الأمر!")
+    
+    deleted = await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f"✅ تم مسح {len(deleted)-1} رسالة", delete_after=3)
+    
+    embed = discord.Embed(title="🗑️ مسح رسائل", color=discord.Color.blue())
+    embed.add_field(name="المسؤول", value=ctx.author.mention)
+    embed.add_field(name="القناة", value=ctx.channel.mention)
+    embed.add_field(name="العدد", value=str(len(deleted)-1))
+    await log_action(ctx, embed)
+
+# 2. TIMEOUT (صمها، اسكت، اص)
+@bot.command(name="صمها", aliases=["اسكت", "اص"])
+async def timeout(ctx, member: discord.Member, minutes: int = 10):
+    if not await has_permission(ctx, "timeout"):
+        return await ctx.send("❌ ليس لديك صلاحية إسكات الأعضاء!")
+    
+    duration = timedelta(minutes=minutes)
+    await member.timeout(duration, reason=f"Mod Action by {ctx.author}")
+    await ctx.send(f"✅ تم إسكات {member.mention} لمدة {minutes} دقيقة")
+    
+    embed = discord.Embed(title="🔇 إسكات عضو", color=discord.Color.orange())
+    embed.add_field(name="العضو", value=member.mention)
+    embed.add_field(name="المسؤول", value=ctx.author.mention)
+    embed.add_field(name="المدة", value=f"{minutes} دقيقة")
+    await log_action(ctx, embed)
+
+# 3. WARN (تحذير، ت)
+@bot.command(name="تحذير", aliases=["ت"])
+async def warn(ctx, member: discord.Member, *, reason="لا يوجد سبب"):
+    if not await has_permission(ctx, "warn"):
+        return await ctx.send("❌ ليس لديك صلاحية تحذير الأعضاء!")
+    
+    gid = ctx.guild.id
+    if gid not in member_warns: member_warns[gid] = {}
+    if member.id not in member_warns[gid]: member_warns[gid][member.id] = 0
+    
+    member_warns[gid][member.id] += 1
+    count = member_warns[gid][member.id]
+    
+    await ctx.send(f"✅ تم تحذير {member.mention} | التحذير رقم: {count}")
+    
+    embed = discord.Embed(title="⚠️ تحذير عضو", color=discord.Color.yellow())
+    embed.add_field(name="العضو", value=member.mention)
+    embed.add_field(name="المسؤول", value=ctx.author.mention)
+    embed.add_field(name="السبب", value=reason)
+    embed.add_field(name="إجمالي التحذيرات", value=str(count))
+    await log_action(ctx, embed)
+
+# 4. WARNS LIST (تحذيرات)
+@bot.command(name="تحذيرات")
+async def warn_list(ctx, member: discord.Member):
+    if not await has_permission(ctx, "warn_list"):
+        return await ctx.send("❌ ليس لديك صلاحية رؤية التحذيرات!")
+    
+    gid = ctx.guild.id
+    count = member_warns.get(gid, {}).get(member.id, 0)
+    await ctx.send(f"📊 العضو {member.mention} لديه **{count}** تحذيرات")
+
+# 5. ROLE GIVE/REMOVE (ر، رول)
+@bot.command(name="ر", aliases=["رول"])
+async def manage_role(ctx, member: discord.Member, *, role_name: str):
+    if not await has_permission(ctx, "role"):
+        return await ctx.send("❌ ليس لديك صلاحية إدارة الأدوار!")
+    
+    role = discord.utils.get(ctx.guild.roles, name=role_name)
+    if not role:
+        return await ctx.send(f"❌ لم يتم العثور على رول باسم `{role_name}`")
+    
+    if role in member.roles:
+        await member.remove_roles(role)
+        action = "إزالة"
+        color = discord.Color.red()
+    else:
+        await member.add_roles(role)
+        action = "إضافة"
+        color = discord.Color.green()
         
-        channel = interaction.channel
-        guild = interaction.guild
-        
-        logs_channel = discord.utils.get(guild.text_channels, name="ticket-logs")
-        if not logs_channel:
-            logs_channel = await guild.create_text_channel("ticket-logs")
-        
-        # Get ticket info
-        ticket_info = None
-        if
+    await ctx.send(f"✅ تم {action} رول {role.name} لـ {member.mention}")
+    
+    embed = discord.Embed(title=f"🎭 {action} رول", color=color)
+    embed.add_field(name="العضو", value=member.mention)
+    embed.add_field(name="الرول", value=role.mention)
+    embed.add_field(name="المسؤول", value=ctx.author.mention)
+    await log_action(ctx, embed)
+
+# 6. LOCK (ق)
+@bot.command(name="ق")
+async def lock(ctx):
+    if not await has_permission(ctx, "lock"):
+        return await ctx.send("❌ ليس لديك صلاحية قفل القناة!")
+    
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False)
+    await ctx.send("🔒 تم قفل القناة")
+    
+    embed = discord.Embed(title="🔒 قفل قناة", color=discord.Color.red())
+    embed.add_field(name="القناة", value=ctx.channel.mention)
+    embed.add_field(name="المسؤول", value=ctx.author.mention)
+    await log_action(ctx, embed)
+
+# 7. UNLOCK (ف)
+@bot.command(name="ف")
+async def unlock(ctx):
+    if not await has_permission(ctx, "lock"):
+        return await ctx.send("❌ ليس لديك صلاحية فتح القناة!")
+    
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
+    await ctx.send("🔓 تم فتح القناة")
+    
+    embed = discord.Embed(title="🔓 فتح قناة", color=discord.Color.green())
+    embed.add_field(name="القناة", value=ctx.channel.mention)
+    embed.add_field(name="المسؤول", value=ctx.author.mention)
+    await log_action(ctx, embed)
+
+# 8. KICK (برا)
+@bot.command(name="برا")
+async def kick(ctx, member: discord.Member, *, reason="لا يوجد سبب"):
+    if not await has_permission(ctx, "kick"):
+        return await ctx.send("❌ ليس لديك صلاحية طرد الأعضاء!")
+    
+    await member.kick(reason=reason)
+    await ctx.send(f"✅ تم طرد {member.name} من السيرفر")
+    
+    embed = discord.Embed(title="👢 طرد عضو", color=discord.Color.orange())
+    embed.add_field(name="العضو", value=member.mention)
+    embed.add_field(name="السبب", value=reason)
+    embed.add_field(name="المسؤول", value=ctx.author.mention)
+    await log_action(ctx, embed)
+
+# 9. BAN (بنعالي، كسرة، بان)
+@bot.command(name="بان", aliases=["بنعالي", "كسرة"])
+async def ban(ctx, member: discord.Member, *, reason="لا يوجد سبب"):
+    if not await has_permission(ctx, "ban"):
+        return await ctx.send("❌ ليس لديك صلاحية حظر الأعضاء!")
+    
+    await member.ban(reason=reason)
+    await ctx.send(f"✅ تم حظر {member.name} نهائياً")
+    
+    embed = discord.Embed(title="🔨 حظر عضو", color=discord.Color.dark_red())
+    embed.add_field(name="العضو", value=member.mention)
+    embed.add_field(name="السبب", value=reason)
+    embed.add_field(name="المسؤول", value=ctx.author.mention)
+    await log_action(ctx, embed)
+
+bot.run("YOUR_TOKEN_HERE")
+```
