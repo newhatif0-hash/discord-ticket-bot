@@ -67,25 +67,54 @@ class TicketButtons(discord.ui.View):
             topic=f"user_id:{user.id}|ticket_id:{ticket_number}"
         )
         
-        # Send embed in ticket channel
-        embed = discord.Embed(
-            title=f"تذكرة جديدة #{ticket_number}",
-            description=f"مرحباً {user.mention}!\n\nشكراً لفتحك تذكرة. فريق الدعم سيرد عليك قريباً.\n\nاكتب رسالتك أدناه.",
-            color=discord.Color.blue()
-        )
-        embed.set_footer(text="اضغط على الزر لإغلاق التذكرة")
+        # Store ticket info
+        if guild.id not in tickets:
+            tickets[guild.id] = {}
+        tickets[guild.id][ticket_channel.id] = {
+            "user_id": user.id,
+            "ticket_number": ticket_number,
+            "created_at": datetime.now(),
+            "status": "مفتوحة"
+        }
         
-        await ticket_channel.send(embed=embed, view=CloseTicketButtons())
+        # Send welcome embed in ticket channel
+        embed = discord.Embed(
+            title=f"🎫 تذكرة جديدة #{ticket_number}",
+            description=f"مرحباً {user.mention}!\n\nشكراً لفتحك تذكرة دعم. فريق الدعم سيرد عليك قريباً.\n\n**اكتب رسالتك أدناه وتواصل معنا**",
+            color=discord.Color.from_rgb(88, 101, 242)
+        )
+        embed.add_field(name="👤 المستخدم", value=f"{user.mention}", inline=True)
+        embed.add_field(name="📅 التاريخ", value=f"<t:{int(datetime.now().timestamp())}:F>", inline=True)
+        embed.add_field(name="🔖 حالة التذكرة", value="🟢 مفتوحة", inline=True)
+        embed.set_footer(text="استخدم الأزرار أدناه لإدارة التذكرة")
+        
+        await ticket_channel.send(embed=embed, view=TicketManagementButtons())
         
         await interaction.response.send_message(
-            f"✅ تم إنشاء تذكرتك: {ticket_channel.mention}",
+            f"✅ تم إنشاء تذكرتك بنجاح: {ticket_channel.mention}",
             ephemeral=True
         )
 
-# Close ticket button
-class CloseTicketButtons(discord.ui.View):
+# Ticket Management buttons
+class TicketManagementButtons(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+    
+    @discord.ui.button(label="إضافة عضو", style=discord.ButtonStyle.blurple, emoji="➕")
+    async def add_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AddUserModal())
+    
+    @discord.ui.button(label="إزالة عضو", style=discord.ButtonStyle.blurple, emoji="➖")
+    async def remove_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(RemoveUserModal())
+    
+    @discord.ui.button(label="تغيير الحالة", style=discord.ButtonStyle.primary, emoji="🔄")
+    async def change_status(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "اختر حالة التذكرة:",
+            view=StatusView(),
+            ephemeral=True
+        )
     
     @discord.ui.button(label="إغلاق التذكرة", style=discord.ButtonStyle.red, emoji="🔒")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -102,35 +131,173 @@ class CloseTicketButtons(discord.ui.View):
         # Create transcript
         messages = []
         async for msg in channel.history(limit=None, oldest_first=True):
-            messages.append(f"[{msg.created_at}] {msg.author}: {msg.content}")
+            messages.append(f"[{msg.created_at.strftime('%Y-%m-%d %H:%M:%S')}] {msg.author}: {msg.content}")
         
-        transcript = "\n".join(messages)
+        transcript = "\n".join(messages) if messages else "لا توجد رسائل"
         
         # Send to logs
         embed = discord.Embed(
-            title=f"تذكرة مغلقة: {channel.name}",
+            title=f"🔒 تذكرة مغلقة: {channel.name}",
             description=f"تم إغلاق التذكرة بواسطة {interaction.user.mention}",
             color=discord.Color.red()
         )
-        embed.add_field(name="عدد الرسائل", value=len(messages), inline=False)
+        embed.add_field(name="📊 عدد الرسائل", value=str(len(messages)), inline=True)
+        embed.add_field(name="👤 صاحب التذكرة", value=f"<@{tickets[guild.id][channel.id]['user_id']}>", inline=True)
+        embed.add_field(name="⏱️ المدة", value="تم الإغلاق", inline=True)
         
         await logs_channel.send(embed=embed)
         
-        # Delete channel after 5 seconds
-        await interaction.followup.send("🔒 سيتم حذف التذكرة خلال 5 ثواني...")
-        await asyncio.sleep(5)
+        # Send closing message
+        await interaction.followup.send(
+            embed=discord.Embed(
+                title="🔒 تم إغلاق التذكرة",
+                description="سيتم حذف قناة التذكرة خلال 10 ثواني...",
+                color=discord.Color.red()
+            )
+        )
+        
+        await asyncio.sleep(10)
         await channel.delete(reason="تم إغلاق التذكرة")
+
+# Status selection view
+class StatusView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+    
+    @discord.ui.button(label="مفتوحة", style=discord.ButtonStyle.success, emoji="🟢")
+    async def status_open(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.update_status(interaction, "مفتوحة", "🟢")
+    
+    @discord.ui.button(label="قيد المراجعة", style=discord.ButtonStyle.primary, emoji="🟡")
+    async def status_pending(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.update_status(interaction, "قيد المراجعة", "🟡")
+    
+    @discord.ui.button(label="محلولة", style=discord.ButtonStyle.success, emoji="✅")
+    async def status_resolved(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.update_status(interaction, "محلولة", "✅")
+    
+    async def update_status(self, interaction: discord.Interaction, status: str, emoji: str):
+        guild = interaction.guild
+        channel = interaction.channel
+        
+        # Update ticket info
+        if guild.id in tickets and channel.id in tickets[guild.id]:
+            tickets[guild.id][channel.id]["status"] = status
+        
+        # Send status update embed
+        embed = discord.Embed(
+            title=f"{emoji} تم تحديث حالة التذكرة",
+            description=f"الحالة الجديدة: **{status}**",
+            color=discord.Color.from_rgb(88, 101, 242)
+        )
+        embed.add_field(name="👤 تم التحديث بواسطة", value=interaction.user.mention, inline=False)
+        
+        await channel.send(embed=embed)
+        await interaction.response.defer()
+
+# Add user modal
+class AddUserModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="إضافة عضو للتذكرة")
+        self.user_input = discord.ui.TextInput(
+            label="معرف أو ذكر المستخدم",
+            placeholder="اكتب معرف المستخدم أو أذكره"
+        )
+        self.add_item(self.user_input)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            user_input = str(self.user_input.value).strip()
+            guild = interaction.guild
+            channel = interaction.channel
+            
+            # Try to find user
+            user = None
+            if user_input.startswith("<@") and user_input.endswith(">"):
+                user_id = int(user_input[2:-1])
+                user = await guild.fetch_member(user_id)
+            else:
+                try:
+                    user = await guild.fetch_member(int(user_input))
+                except:
+                    user = discord.utils.get(guild.members, name=user_input)
+            
+            if not user:
+                await interaction.response.send_message("❌ لم يتم العثور على المستخدم!", ephemeral=True)
+                return
+            
+            # Add user to channel
+            await channel.set_permissions(user, read_messages=True, send_messages=True)
+            
+            embed = discord.Embed(
+                title="➕ تم إضافة عضو",
+                description=f"تم إضافة {user.mention} للتذكرة",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="✋ من أضافه", value=interaction.user.mention, inline=False)
+            
+            await channel.send(embed=embed)
+            await interaction.response.defer()
+        except Exception as e:
+            await interaction.response.send_message(f"❌ خطأ: {str(e)}", ephemeral=True)
+
+# Remove user modal
+class RemoveUserModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="إزالة عضو من التذكرة")
+        self.user_input = discord.ui.TextInput(
+            label="معرف أو ذكر المستخدم",
+            placeholder="اكتب معرف المستخدم أو أذكره"
+        )
+        self.add_item(self.user_input)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            user_input = str(self.user_input.value).strip()
+            guild = interaction.guild
+            channel = interaction.channel
+            
+            # Try to find user
+            user = None
+            if user_input.startswith("<@") and user_input.endswith(">"):
+                user_id = int(user_input[2:-1])
+                user = await guild.fetch_member(user_id)
+            else:
+                try:
+                    user = await guild.fetch_member(int(user_input))
+                except:
+                    user = discord.utils.get(guild.members, name=user_input)
+            
+            if not user:
+                await interaction.response.send_message("❌ لم يتم العثور على المستخدم!", ephemeral=True)
+                return
+            
+            # Remove user from channel
+            await channel.set_permissions(user, overwrite=None)
+            
+            embed = discord.Embed(
+                title="➖ تم إزالة عضو",
+                description=f"تم إزالة {user.mention} من التذكرة",
+                color=discord.Color.red()
+            )
+            embed.add_field(name="✋ من أزاله", value=interaction.user.mention, inline=False)
+            
+            await channel.send(embed=embed)
+            await interaction.response.defer()
+        except Exception as e:
+            await interaction.response.send_message(f"❌ خطأ: {str(e)}", ephemeral=True)
 
 # Command to send ticket embed
 @bot.tree.command(name="تذاكر", description="إرسال لوحة التذاكر")
 @app_commands.default_permissions(administrator=True)
-async def tickets(interaction: discord.Interaction):
+async def tickets_command(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🎫 نظام التذاكر",
-        description="اضغط على الزر أدناه لفتح تذكرة دعم جديدة",
-        color=discord.Color.blue()
+        description="اضغط على الزر أدناه لفتح تذكرة دعم جديدة\n\n**الميزات:**\n✨ دعم سريع وفعال\n👥 إضافة/إزالة أعضاء\n🔄 تتبع حالة التذكرة\n📊 سجل شامل",
+        color=discord.Color.from_rgb(88, 101, 242)
     )
-    embed.add_field(name="📌 ملاحظة", value="يمكنك فتح تذكرة واحدة فقط في المرة", inline=False)
+    embed.add_field(name="📌 ملاحظات مهمة", value="• يمكنك فتح تذكرة واحدة فقط\n• التذاكر المفتوحة تُحفظ في السجلات\n• فريق الدعم متاح 24/7", inline=False)
+    embed.set_footer(text="نظام التذاكر v1.0")
     
     await interaction.response.send_message(embed=embed, view=TicketButtons())
 
@@ -140,4 +307,4 @@ if not TOKEN:
     print("❌ لم يتم العثور على DISCORD_TOKEN")
 else:
     bot.run(TOKEN)
-    
+        
